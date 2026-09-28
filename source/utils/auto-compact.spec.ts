@@ -720,8 +720,62 @@ test('performAutoCompact notifies the user when the LLM summariser fails and mec
 
 	t.truthy(result, 'mechanical fallback still produces output');
 	t.true(
-		notifications.some(n => /llm/i.test(n) && /fail/i.test(n)),
-		`user must be told the LLM summariser failed before mechanical compaction ran; got: ${JSON.stringify(notifications)}`,
+		notifications.some(n => /llm/i.test(n) && /unavailable/i.test(n)),
+		`user must be told the LLM summary was unavailable before mechanical compaction ran; got: ${JSON.stringify(notifications)}`,
+	);
+});
+
+test('performAutoCompact does not claim the LLM call failed when nothing was compressible (issue #1518)', async t => {
+	setupAutoCompactEnv(100);
+
+	// A single message: with the default 2-message "recent" tail, the whole
+	// compressible segment is empty, so `summariseWithLLM` returns null
+	// without ever calling `client.chat`. This is the common real-world
+	// trigger (e.g. one large paste) and is not a failure of any kind.
+	const messages: Message[] = [{role: 'user', content: 'old '.repeat(400)}];
+	const systemMessage: Message = {role: 'system', content: 'sys'};
+	let chatCalled = false;
+	const client: LLMClient = {
+		getCurrentModel: () => 'stub',
+		setModel: () => {},
+		getContextSize: () => 100_000,
+		getAvailableModels: async () => ['stub'],
+		getProviderConfig: () => ({
+			name: 'stub',
+			type: 'openai' as const,
+			models: ['stub'],
+			config: {},
+		}),
+		chat: async () => {
+			chatCalled = true;
+			throw new Error('should not be called');
+		},
+		clearContext: async () => {},
+		getTimeout: () => undefined,
+	};
+
+	const notifications: string[] = [];
+	const result = await performAutoCompact(
+		messages,
+		systemMessage,
+		'openai',
+		'gpt-4',
+		{
+			enabled: true,
+			threshold: 50,
+			mode: 'default',
+			strategy: 'llm',
+			notifyUser: true,
+		},
+		n => notifications.push(n),
+		client,
+	);
+
+	t.truthy(result, 'mechanical fallback still produces output');
+	t.false(chatCalled, 'the LLM was never actually called');
+	t.false(
+		notifications.some(n => /call failed/i.test(n)),
+		`notice must not claim the LLM call failed when it was never attempted; got: ${JSON.stringify(notifications)}`,
 	);
 });
 
