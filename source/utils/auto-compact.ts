@@ -301,8 +301,16 @@ export async function performAutoCompact(
 		// Show notification if enabled
 		if (config.notifyUser && onNotify) {
 			const reduction = Math.round(result.reductionPercentage);
+			// Generic on purpose: `summariseWithLLM` returns null for several
+			// distinct, non-error reasons (nothing compressible to summarise, the
+			// LLM call itself failing, or the summary not coming out smaller than
+			// the source), and this call site can't tell them apart. Claiming a
+			// specific cause — e.g. "the LLM call failed" — would be false in the
+			// common case where the call was never even attempted. Mirrors the
+			// wording the manual `/compact` handler already uses for the same
+			// ambiguity (compact-handler.ts).
 			const degradedNotice = llmSummaryFailed
-				? ' (summary degraded: LLM call failed)'
+				? ' (LLM summary unavailable, used mechanical compaction)'
 				: '';
 			onNotify(
 				`Context at ${Math.round(usagePercentage)}% capacity - auto-compacting...${degradedNotice}\n\nContext Compacted: ${result.originalTokenCount.toLocaleString()} tokens → ${result.compressedTokenCount.toLocaleString()} tokens (${reduction}% reduction)`,
