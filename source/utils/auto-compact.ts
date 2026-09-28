@@ -218,6 +218,11 @@ export async function performAutoCompact(
 
 		compressionBackup.storeBackup(messages);
 
+		// Set when the LLM strategy was attempted but produced no usable result,
+		// so the mechanical-path notification below can tell the user their
+		// summary was degraded instead of silently falling back.
+		let llmSummaryFailed = false;
+
 		// LLM strategy: ask the model to summarise the compressible segment into
 		// a single synthetic message. Falls back to mechanical on any failure
 		// (network error, malformed response, etc.) so a transient model issue
@@ -265,11 +270,16 @@ export async function performAutoCompact(
 
 					return llmCompressed;
 				}
+
+				// summariseWithLLM returned no usable result; fall through to
+				// mechanical below with the degraded notice.
+				llmSummaryFailed = true;
 			} catch (_error) {
 				if (signal?.aborted) {
 					return null;
 				}
 				// fall through to mechanical
+				llmSummaryFailed = true;
 			}
 		}
 
@@ -291,8 +301,11 @@ export async function performAutoCompact(
 		// Show notification if enabled
 		if (config.notifyUser && onNotify) {
 			const reduction = Math.round(result.reductionPercentage);
+			const degradedNotice = llmSummaryFailed
+				? ' (summary degraded: LLM call failed)'
+				: '';
 			onNotify(
-				`Context at ${Math.round(usagePercentage)}% capacity - auto-compacting...\n\nContext Compacted: ${result.originalTokenCount.toLocaleString()} tokens → ${result.compressedTokenCount.toLocaleString()} tokens (${reduction}% reduction)`,
+				`Context at ${Math.round(usagePercentage)}% capacity - auto-compacting...${degradedNotice}\n\nContext Compacted: ${result.originalTokenCount.toLocaleString()} tokens → ${result.compressedTokenCount.toLocaleString()} tokens (${reduction}% reduction)`,
 			);
 		}
 
