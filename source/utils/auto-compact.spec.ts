@@ -673,6 +673,58 @@ test('performAutoCompact falls back to mechanical when LLM throws', async t => {
 	);
 });
 
+test('performAutoCompact notifies the user when the LLM summariser fails and mechanical fallback is used (issue #1518)', async t => {
+	setupAutoCompactEnv(100);
+
+	const messages: Message[] = [
+		{role: 'user', content: 'old '.repeat(400)},
+		{role: 'assistant', content: 'reply'},
+		{role: 'user', content: 'recent'},
+		{role: 'assistant', content: 'recent reply'},
+	];
+	const systemMessage: Message = {role: 'system', content: 'sys'};
+	const client: LLMClient = {
+		getCurrentModel: () => 'stub',
+		setModel: () => {},
+		getContextSize: () => 100_000,
+		getAvailableModels: async () => ['stub'],
+		getProviderConfig: () => ({
+			name: 'stub',
+			type: 'openai' as const,
+			models: ['stub'],
+			config: {},
+		}),
+		chat: async () => {
+			throw new Error('boom');
+		},
+		clearContext: async () => {},
+		getTimeout: () => undefined,
+	};
+
+	const notifications: string[] = [];
+	const result = await performAutoCompact(
+		messages,
+		systemMessage,
+		'openai',
+		'gpt-4',
+		{
+			enabled: true,
+			threshold: 50,
+			mode: 'default',
+			strategy: 'llm',
+			notifyUser: true,
+		},
+		n => notifications.push(n),
+		client,
+	);
+
+	t.truthy(result, 'mechanical fallback still produces output');
+	t.true(
+		notifications.some(n => /llm/i.test(n) && /fail/i.test(n)),
+		`user must be told the LLM summariser failed before mechanical compaction ran; got: ${JSON.stringify(notifications)}`,
+	);
+});
+
 test('performAutoCompact uses provider-configured context limit', async t => {
 	const messages: Message[] = [
 		{role: 'user', content: 'x'.repeat(3000)},
